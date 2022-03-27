@@ -290,3 +290,55 @@ def GN3(rvec,tvec,ids,corners,iter=3):
         current_t=current_t+torch.from_numpy(dx[3:6,0].reshape(1,3))
 
     return current_r.detach().numpy(),current_t.detach().numpy()
+
+def GN_L(obj_points,corners, rvec,tvec,iters=7,show_loss=False):
+    n=np.shape(obj_points)[0]
+    rvec2=np.zeros((1,3))
+    tvec2=np.zeros((1,3))
+    R,_=cv2.Rodrigues(rvec)
+
+    T_esti=SE3.from_matrix(np.vstack([np.hstack([R,tvec.T]),np.array([[0,0,0,1]])]))
+    cost=0.
+    # print(T_esti.as_matrix())
+    for iter in range(iters):
+        cost=0.
+        J=np.zeros((2,6))
+        H=np.zeros((6,6))
+        b=np.zeros((6,1))
+        for i in range(n):
+            vector3d = np.dot(T_esti.as_matrix(),np.append(obj_points[i],1).reshape(4,1))
+            x=vector3d[0][0]
+            y=vector3d[1][0]
+            z=vector3d[2][0]
+            p_=np.array([[fx * ( x/z ) + cx],[fy * ( y/z ) + cy]])
+            e=np.array([[corners[i][0][0]-p_[0][0]],[corners[i][0][1]-p_[1][0]]])
+            cost+=e[0][0]*e[0][0]+e[1][0]*e[1][0]
+            J[0,0] = -(fx/z)
+            J[0,1] = 0
+            J[0,2] = (fx*x/(z*z))
+            J[0,3] = (fx*x*y/(z*z))
+            J[0,4] = -(fx*x*x/(z*z)+fx)
+            J[0,5] = (fx*y/z)
+            J[1,0] = 0
+            J[1,1] = -(fy/z)
+            J[1,2] = (fy*y/(z*z))
+            J[1,3] = (fy*y*y/(z*z)+fy)
+            J[1,4] = -(fy*x*y/(z*z))
+            J[1,5] = -(fy*x/z)
+        
+            H+=np.dot(J.T,J)
+            b-=np.dot(J.T,e)
+
+        if iter==0 and show_loss:
+            print(f"init loss:  {cost/4}")
+        if cost>500:
+            return rvec,tvec
+        dx=0.5*np.dot(np.linalg.inv(H),b)
+        T_esti=SE3.exp(dx.T[0]).dot(T_esti)
+            #if cost/4<1: break
+        tmp,_=cv2.Rodrigues(T_esti.as_matrix()[0:3,0:3])
+        rvec2=tmp.T
+        tvec2=T_esti.as_matrix()[0:3,3:4].T
+        if show_loss:print(f"final loss:  {cost/4}")
+        
+    return rvec2,tvec2
